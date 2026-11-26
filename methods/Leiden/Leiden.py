@@ -1,0 +1,43 @@
+import episcanpy as epi
+import numpy as np
+import scanpy as sc
+import sklearn
+import pandas as pd
+import sys
+
+h5adpath = sys.argv[1]
+predcluster = sys.argv[2]
+savepath = sys.argv[3]
+
+adata = sc.read_h5ad(h5adpath)
+adata = adata[:, ~np.all(np.isnan(adata.X), axis=0)].copy()
+# Step 2: Calculate the median for each column, ignoring NaNs
+medians = np.nanmedian(adata.X, axis=0)
+# Step 3: Replace NaNs with the column medians
+for i in range(adata.X.shape[1]):
+    adata.X[:, i] = np.where(np.isnan(adata.X[:, i]), medians[i], adata.X[:, i])
+epi.pp.lazy(adata, nb_pcs=min(adata.n_obs - 1, 50), perplexity=min(adata.n_obs - 1, 30))
+epi.tl.leiden(adata)
+
+cluster_key='MajorType'
+label_key='leiden'
+print('Leiden')
+print(adata.obs[cluster_key])
+print(adata.obs[label_key])
+df_clustering = pd.DataFrame()
+sorted_cell_names = sorted(adata.obs_names)
+cell2major = dict(zip(adata.obs.index, adata.obs["leiden"]))
+major_type_list = [cell2major[cell] for cell in sorted_cell_names]
+major_type_arr = np.array(major_type_list)
+df_clustering['Leiden'] = major_type_arr
+df_clustering.to_csv(predcluster, header=True, index=False)
+ARI = epi.tl.ARI(adata, cluster_key, label_key)
+AMI = epi.tl.AMI(adata, cluster_key, label_key)
+NMI = sklearn.metrics.normalized_mutual_info_score(adata.obs[cluster_key], adata.obs[label_key])
+FMI = sklearn.metrics.fowlkes_mallows_score(adata.obs[cluster_key], adata.obs[label_key])
+Comp = sklearn.metrics.completeness_score(adata.obs[cluster_key], adata.obs[label_key])
+Homo = epi.tl.homogeneity(adata, cluster_key, label_key)
+print('Leiden')
+print('ARI:%.6f\tAMI:%.6f\tNMI:%.6f\tFMI:%.6f\tComp:%.6f\tHomoL%.6f'%(ARI, AMI, NMI, FMI, Comp, Homo))
+df = pd.DataFrame({'index': ['ari', 'ami', 'nmi', 'fmi', 'comp', 'homo'], 'value': [ARI, AMI, NMI, FMI, Comp, Homo]})
+df.to_csv(savepath, header=True, index=False, sep='\t')
